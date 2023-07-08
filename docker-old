@@ -1,0 +1,117 @@
+version: '3'
+
+services:
+  php:
+    env_file: .env
+    build:
+      context: ./etc/php
+    container_name: ${APP_NAME}_php
+    entrypoint: sh /bin/entrypoint.sh php-fpm
+    restart: always
+    volumes:
+      - './etc/php/php.ini:/usr/local/etc/php/conf.d/php.ini'
+      - './etc/php/entrypoint.sh:/bin/entrypoint.sh'
+      - ${APP_PATH}:/var/www
+    links:
+      - db:mysql
+    expose:
+      - 9000
+    depends_on:
+      - traefik
+    networks:
+      - server-network
+
+  db:
+    image: mysql:8
+    container_name: ${APP_NAME}_db
+    environment:
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+    volumes:
+      - 'database-volume:/var/lib/mysql'
+    command:
+      [
+        '--character-set-server=utf8mb4',
+        '--collation-server=utf8mb4_unicode_ci',
+        '--default-authentication-plugin=mysql_native_password',
+      ]
+    depends_on:
+      - traefik
+    networks:
+      - server-network
+
+  phpmyadmin:
+    image: phpmyadmin/phpmyadmin
+    container_name: ${APP_NAME}_pma
+    links:
+      - db:db
+    labels:
+      - 'traefik.http.routers.${APP_NAME}_pma.rule=Host(`pma.sumanta.space`)'
+    depends_on:
+      - db
+      - traefik
+    networks:
+      - server-network
+
+  # nodejs:
+  #   env_file: .env
+  #   build: ./etc/nodejs
+  #   container_name: ${APP_NAME}_nodejs
+  #   restart: 'no'
+  #   entrypoint: sh /bin/entrypoint.sh
+  #   volumes:
+  #     - ${APP_PATH}:/var/www/html
+  #     - ./etc/nodejs/entrypoint.sh:/bin/entrypoint.sh
+
+  apache:
+    env_file: .env
+    build: ./etc/httpd
+    container_name: ${APP_NAME}_apache
+    volumes:
+      - './etc/httpd/httpd.conf:/usr/local/apache2/conf/httpd.conf'
+      - ${APP_PATH}:/var/www
+    depends_on:
+      - php
+      - traefik
+    networks:
+      - server-network
+
+  web:
+    env_file: .env
+    build: etc/nginx
+    container_name: ${APP_NAME}_nginx
+    restart: always
+    volumes:
+      - './etc/nginx/nginx.conf:/etc/nginx/nginx.conf'
+      - './etc/nginx/app.conf:/etc/nginx/sites-available/application.conf'
+      - './etc/nginx/app.conf:/etc/nginx/sites-enabled/application'
+      - 'server-volume:/var/log/nginx'
+      - ${APP_PATH}:/var/www
+    labels:
+      - 'traefik.http.routers.${APP_NAME}_nginx.rule=Host(`server.sumanta.space`)'
+    depends_on:
+      - apache
+      - traefik
+    networks:
+      - server-network
+
+  traefik:
+    image: traefik:v2.9
+    container_name: ${APP_NAME}_traefik
+    command: --api.insecure=true --providers.docker
+    ports:
+      - 80:80
+      - 8080:8080
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks:
+      - server-network
+
+volumes:
+  database-volume:
+  server-volume:
+
+networks:
+  server-network:
